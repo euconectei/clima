@@ -1,6 +1,6 @@
 [versions]
-agp = "8.9.2"
-kotlin = "2.1.21"
+agp = "9.2.1"
+kotlin = "2.3.21"
 composeBom = "2025.05.01"
 glance = "1.1.1"
 work = "2.10.1"
@@ -22,5 +22,4 @@ androidx-work-runtime-ktx = { module = "androidx.work:work-runtime-ktx", version
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
-kotlin-android = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }
 kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
