@@ -15,7 +15,7 @@ import java.util.concurrent.TimeUnit
 
 class RefreshWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
     override suspend fun doWork(): Result = try {
-        WeatherRepository(applicationContext).refresh()
+        WeatherRepository(applicationContext).refreshAll()
         ClimaWidgets.updateAll(applicationContext)
         Result.success()
     } catch (_: Exception) {

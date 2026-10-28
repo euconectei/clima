@@ -4,24 +4,31 @@ import org.json.JSONObject
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.LocalTime
+import java.util.Locale
 
 data class Place(
     val name: String,
     val region: String,
     val latitude: Double,
     val longitude: Double,
+    /** Entrada criada pelo botão de localização atual; só existe uma por vez. */
+    val isGps: Boolean = false,
 ) {
     val label get() = if (region.isBlank()) name else "$name, $region"
+
+    /** Identifica o lugar pelas coordenadas (arredondadas), já que nome e região podem variar. */
+    val key get() = "%.2f,%.2f".format(Locale.US, latitude, longitude)
 
     fun toJson(): JSONObject = JSONObject()
         .put("name", name)
         .put("region", region)
         .put("lat", latitude)
         .put("lon", longitude)
+        .put("gps", isGps)
 
     companion object {
         fun fromJson(o: JSONObject) =
-            Place(o.getString("name"), o.optString("region"), o.getDouble("lat"), o.getDouble("lon"))
+            Place(o.getString("name"), o.optString("region"), o.getDouble("lat"), o.getDouble("lon"), o.optBoolean("gps"))
     }
 }
 

@@ -8,9 +8,9 @@ private val ptBR: Locale = Locale.forLanguageTag("pt-BR")
 
 /** Códigos de tempo WMO usados pela Open-Meteo. Os ícones são emojis (Noto Color Emoji, a fonte do Android). */
 object Wmo {
-    fun label(code: Int): String = when (code) {
+    fun label(code: Int, isDay: Boolean = true): String = when (code) {
         0 -> "Céu limpo"
-        1 -> "Predomínio de sol"
+        1 -> if (isDay) "Predomínio de sol" else "Céu quase limpo"
         2 -> "Parcialmente nublado"
         3 -> "Nublado"
         45, 48 -> "Neblina"
@@ -36,7 +36,7 @@ object Wmo {
         2 -> if (isDay) "⛅" else "☁️"
         3 -> "☁️"
         45, 48 -> "🌫️"
-        51, 53, 55, 56, 57 -> "🌦️"
+        51, 53, 55, 56, 57 -> if (isDay) "🌦️" else "🌧️"
         61, 63, 65, 66, 67, 80, 81, 82 -> "🌧️"
         71, 73, 75, 77, 85, 86 -> "🌨️"
         95, 96, 99 -> "⛈️"

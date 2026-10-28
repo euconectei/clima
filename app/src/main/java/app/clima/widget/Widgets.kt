@@ -4,19 +4,28 @@ import android.content.Context
 import android.content.Intent
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.glance.GlanceId
 import androidx.glance.GlanceModifier
 import androidx.glance.GlanceTheme
 import androidx.glance.LocalContext
+import androidx.glance.action.ActionParameters
+import androidx.glance.action.actionParametersOf
 import androidx.glance.action.clickable
 import androidx.glance.appwidget.GlanceAppWidget
+import androidx.glance.appwidget.GlanceAppWidgetManager
 import androidx.glance.appwidget.GlanceAppWidgetReceiver
 import androidx.glance.appwidget.LinearProgressIndicator
 import androidx.glance.appwidget.SizeMode
+import androidx.glance.appwidget.action.ActionCallback
+import androidx.glance.appwidget.action.actionRunCallback
 import androidx.glance.appwidget.action.actionStartActivity
 import androidx.glance.appwidget.appWidgetBackground
 import androidx.glance.appwidget.cornerRadius
@@ -31,6 +40,7 @@ import androidx.glance.layout.ColumnScope
 import androidx.glance.layout.Row
 import androidx.glance.layout.RowScope
 import androidx.glance.layout.Spacer
+import androidx.glance.layout.fillMaxHeight
 import androidx.glance.layout.fillMaxSize
 import androidx.glance.layout.fillMaxWidth
 import androidx.glance.layout.height
@@ -43,11 +53,13 @@ import androidx.glance.unit.ColorProvider
 import app.clima.MainActivity
 import app.clima.data.Day
 import app.clima.data.Hour
+import app.clima.data.Place
 import app.clima.data.Weather
 import app.clima.data.WeatherRepository
 import app.clima.data.Wmo
 import app.clima.data.compass
 import app.clima.data.uvLevel
+import kotlinx.coroutines.flow.map
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.time.format.TextStyle as JTextStyle
@@ -60,8 +72,12 @@ class SmallWidget : GlanceAppWidget() {
     override val sizeMode = SizeMode.Single
 
     override suspend fun provideGlance(context: Context, id: GlanceId) {
-        val weather = WeatherRepository(context).cached()
-        provideContent { GlanceTheme { WidgetFrame(weather) { SmallContent(it) } } }
+        val repo = WeatherRepository(context)
+        val widgetId = GlanceAppWidgetManager(context).getAppWidgetId(id)
+        provideContent {
+            val weather = repo.observe { cachedFor(widgetId) }
+            GlanceTheme { WidgetFrame(weather) { SmallContent(it) } }
+        }
     }
 }
 
@@ -70,8 +86,12 @@ class MediumWidget : GlanceAppWidget() {
     override val sizeMode = SizeMode.Single
 
     override suspend fun provideGlance(context: Context, id: GlanceId) {
-        val weather = WeatherRepository(context).cached()
-        provideContent { GlanceTheme { WidgetFrame(weather) { MediumContent(it) } } }
+        val repo = WeatherRepository(context)
+        val widgetId = GlanceAppWidgetManager(context).getAppWidgetId(id)
+        provideContent {
+            val weather = repo.observe { cachedFor(widgetId) }
+            GlanceTheme { WidgetFrame(weather) { MediumContent(it) } }
+        }
     }
 }
 
@@ -80,8 +100,39 @@ class LargeWidget : GlanceAppWidget() {
     override val sizeMode = SizeMode.Single
 
     override suspend fun provideGlance(context: Context, id: GlanceId) {
-        val weather = WeatherRepository(context).cached()
-        provideContent { GlanceTheme { WidgetFrame(weather) { LargeContent(it) } } }
+        val repo = WeatherRepository(context)
+        val widgetId = GlanceAppWidgetManager(context).getAppWidgetId(id)
+        provideContent {
+            val weather = repo.observe { cachedFor(widgetId) }
+            GlanceTheme { WidgetFrame(weather) { LargeContent(it) } }
+        }
+    }
+}
+
+private class Overview(val selected: Weather?, val cities: List<Pair<Place, Weather?>>, val selectedKey: String)
+
+/**
+ * Relê o cache sempre que ele muda. Com a sessão do Glance viva (~45 s) um updateAll só recompõe e não roda o
+ * provideGlance de novo, então dados lidos antes do provideContent ficariam velhos (o widget ficava sem previsão).
+ */
+@Composable
+private fun <T> WeatherRepository.observe(read: WeatherRepository.() -> T): T {
+    val value by remember { changes().map { read() } }.collectAsState(initial = read())
+    return value
+}
+
+/** Visão geral (4x2): um cartão vertical por cidade salva (localização atual + até 3). */
+class MultiCityWidget : GlanceAppWidget() {
+    override val sizeMode = SizeMode.Single
+
+    override suspend fun provideGlance(context: Context, id: GlanceId) {
+        val repo = WeatherRepository(context)
+        provideContent {
+            val overview = repo.observe { Overview(cached(), places.map { it to cached(it) }, place.key) }
+            GlanceTheme {
+                WidgetFrame(overview.selected, padding = 8.dp) { MultiCityContent(overview.cities, overview.selectedKey) }
+            }
+        }
     }
 }
 
@@ -97,7 +148,31 @@ class LargeWidgetReceiver : ClimaWidgetReceiver() {
     override val glanceAppWidget = LargeWidget()
 }
 
+class MultiCityWidgetReceiver : ClimaWidgetReceiver() {
+    override val glanceAppWidget = MultiCityWidget()
+}
+
+/** Tocar num cartão do carrossel seleciona a cidade no app (e o destaque do carrossel); os widgets individuais seguem a própria escolha. */
+class SelectCityCallback : ActionCallback {
+    override suspend fun onAction(context: Context, glanceId: GlanceId, parameters: ActionParameters) {
+        val repo = WeatherRepository(context)
+        val key = parameters[CityKey] ?: return
+        repo.places.firstOrNull { it.key == key }?.let { repo.place = it }
+        ClimaWidgets.updateAll(context)
+    }
+
+    companion object {
+        val CityKey = ActionParameters.Key<String>("city")
+    }
+}
+
 abstract class ClimaWidgetReceiver : GlanceAppWidgetReceiver() {
+    override fun onDeleted(context: Context, appWidgetIds: IntArray) {
+        super.onDeleted(context, appWidgetIds)
+        val repo = WeatherRepository(context)
+        appWidgetIds.forEach(repo::forgetWidget)
+    }
+
     override fun onEnabled(context: Context) {
         super.onEnabled(context)
         RefreshWorker.runNow(context)
@@ -109,6 +184,7 @@ object ClimaWidgets {
         SmallWidget().updateAll(context)
         MediumWidget().updateAll(context)
         LargeWidget().updateAll(context)
+        MultiCityWidget().updateAll(context)
     }
 }
 
@@ -168,7 +244,7 @@ private enum class Tone { Primary, Variant, OnHighlight }
 // --- Estrutura ------------------------------------------------------------------------------
 
 @Composable
-private fun WidgetFrame(weather: Weather?, content: @Composable (Weather) -> Unit) {
+private fun WidgetFrame(weather: Weather?, padding: Dp = 14.dp, content: @Composable (Weather) -> Unit) {
     val palette = paletteFor(weather?.code ?: -1, weather?.isDay ?: true)
     CompositionLocalProvider(LocalPalette provides palette) {
         Box(
@@ -178,7 +254,7 @@ private fun WidgetFrame(weather: Weather?, content: @Composable (Weather) -> Uni
                 .background(palette.background)
                 .cornerRadius(android.R.dimen.system_app_widget_background_radius)
                 .clickable(actionStartActivity(Intent(LocalContext.current, MainActivity::class.java)))
-                .padding(14.dp),
+                .padding(padding),
         ) {
             if (weather == null) {
                 Column(GlanceModifier.fillMaxSize(), verticalAlignment = Alignment.CenterVertically) {
@@ -231,7 +307,7 @@ private fun SmallContent(w: Weather) {
         Spacer(GlanceModifier.defaultWeight())
         Box(GlanceModifier.fillMaxWidth().height(1.dp).background(p.pill)) {}
         Spacer(GlanceModifier.height(6.dp))
-        GText(Wmo.label(w.code), 12, FontWeight.Medium, tone = Tone.Variant)
+        GText(Wmo.label(w.code, w.isDay), 12, FontWeight.Medium, tone = Tone.Variant)
     }
 }
 
@@ -249,7 +325,7 @@ private fun MediumContent(w: Weather) {
             Spacer(GlanceModifier.width(10.dp))
             Column(GlanceModifier.defaultWeight()) {
                 GText(w.place.name, 15, FontWeight.Bold)
-                GText("${Wmo.label(w.code)} · sens. ${w.feelsLike}° · ${today.min}°–${today.max}°", 10, tone = Tone.Variant)
+                GText("${Wmo.label(w.code, w.isDay)} · sens. ${w.feelsLike}° · ${today.min}°–${today.max}°", 10, tone = Tone.Variant)
             }
             GText("${w.temp}°", 38, FontWeight.Bold)
         }
@@ -268,6 +344,101 @@ private fun MediumContent(w: Weather) {
     }
 }
 
+// --- Várias cidades -------------------------------------------------------------------------
+
+/** O layout se adapta à quantidade: 1 cartão horizontal; 2 a 4 cartões verticais, mais compactos quanto mais cidades. */
+@Composable
+private fun MultiCityContent(cities: List<Pair<Place, Weather?>>, selectedKey: String) {
+    val single = cities.singleOrNull()
+    if (single != null) {
+        SingleCityCard(single.first, single.second)
+        return
+    }
+    Row(GlanceModifier.fillMaxSize()) {
+        cities.forEachIndexed { i, (place, weather) ->
+            if (i > 0) Spacer(GlanceModifier.width(4.dp))
+            CityCard(place, weather, selected = place.key == selectedKey, roomy = cities.size <= 2)
+        }
+    }
+}
+
+private fun cityClick(place: Place) =
+    actionRunCallback<SelectCityCallback>(actionParametersOf(SelectCityCallback.CityKey to place.key))
+
+/** Subtítulo do cartão: a região do lugar. */
+private fun Place.subtitle() = region
+
+/** Cartão vertical estreito: com 3 ou 4 cidades o nome é truncado e o pin só marca a localização atual. */
+@Composable
+private fun RowScope.CityCard(place: Place, w: Weather?, selected: Boolean, roomy: Boolean) {
+    val p = LocalPalette.current
+    val tone = if (selected) Tone.OnHighlight else Tone.Primary
+    val variant = if (selected) Tone.OnHighlight else Tone.Variant
+    val today = w?.daily?.firstOrNull()
+    Column(
+        GlanceModifier
+            .defaultWeight()
+            .fillMaxHeight()
+            .background(if (selected) p.highlight else p.pill)
+            .cornerRadius(18.dp)
+            .padding(horizontal = 6.dp, vertical = 5.dp)
+            .clickable(cityClick(place)),
+    ) {
+        Row(GlanceModifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Column(GlanceModifier.defaultWeight()) {
+                GText(if (place.isGps) "📍${place.name}" else place.name, if (roomy) 12 else 10, FontWeight.Bold, tone = tone)
+                if (roomy && place.subtitle().isNotBlank()) GText(place.subtitle(), 9, tone = variant)
+            }
+            if (w != null) GText(Wmo.icon(w.code, w.isDay), if (roomy) 18 else 14, tone = tone)
+        }
+        Spacer(GlanceModifier.defaultWeight())
+        GText(if (w != null) "${w.temp}°" else "—", if (roomy) 26 else 22, FontWeight.Bold, tone = tone)
+        GText(if (w != null) Wmo.label(w.code, w.isDay) else "Sem dados", if (roomy) 10 else 8, tone = variant)
+        Spacer(GlanceModifier.defaultWeight())
+        Row(GlanceModifier.fillMaxWidth()) {
+            GText("↓${today?.min ?: "—"}°", if (roomy) 11 else 9, FontWeight.Medium, tone = variant)
+            Spacer(GlanceModifier.defaultWeight())
+            GText("↑${today?.max ?: "—"}°", if (roomy) 11 else 9, FontWeight.Medium, tone = variant)
+        }
+    }
+}
+
+/** Só uma cidade (a localização atual): um cartão horizontal, com nome, temperatura e mín/máx lado a lado. */
+@Composable
+private fun SingleCityCard(place: Place, w: Weather?) {
+    val p = LocalPalette.current
+    val today = w?.daily?.firstOrNull()
+    Row(
+        GlanceModifier
+            .fillMaxSize()
+            .background(p.highlight)
+            .cornerRadius(22.dp)
+            .padding(horizontal = 14.dp, vertical = 8.dp)
+            .clickable(cityClick(place)),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(GlanceModifier.defaultWeight()) {
+            GText(if (place.isGps) "📍${place.name}" else place.name, 14, FontWeight.Bold, tone = Tone.OnHighlight)
+            if (place.subtitle().isNotBlank()) GText(place.subtitle(), 10, tone = Tone.OnHighlight)
+        }
+        if (w != null) GText(Wmo.icon(w.code, w.isDay), 30, tone = Tone.OnHighlight)
+        Spacer(GlanceModifier.width(10.dp))
+        Box(GlanceModifier.width(1.dp).height(40.dp).background(p.pill)) {}
+        Spacer(GlanceModifier.width(10.dp))
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            GText(if (w != null) "${w.temp}°" else "—", 34, FontWeight.Bold, tone = Tone.OnHighlight)
+            GText(if (w != null) Wmo.label(w.code, w.isDay) else "Sem dados", 10, tone = Tone.OnHighlight)
+        }
+        Spacer(GlanceModifier.width(10.dp))
+        Box(GlanceModifier.width(1.dp).height(40.dp).background(p.pill)) {}
+        Spacer(GlanceModifier.width(10.dp))
+        Column {
+            GText("↑${today?.max ?: "—"}°", 12, FontWeight.Bold, tone = Tone.OnHighlight)
+            GText("↓${today?.min ?: "—"}°", 12, FontWeight.Medium, tone = Tone.OnHighlight)
+        }
+    }
+}
+
 // --- Grande ---------------------------------------------------------------------------------
 
 @Composable
@@ -282,7 +453,7 @@ private fun LargeContent(w: Weather) {
                 Column(GlanceModifier.defaultWeight()) {
                     GText("📍 ${w.place.name}", 16, FontWeight.Bold)
                     GText(today.date.header(), 10, tone = Tone.Variant)
-                    GText(Wmo.label(w.code), 12, FontWeight.Medium, tone = Tone.Variant)
+                    GText(Wmo.label(w.code, w.isDay), 12, FontWeight.Medium, tone = Tone.Variant)
                 }
                 Column(horizontalAlignment = Alignment.End) {
                     GText("${w.temp}°", 46, FontWeight.Bold)

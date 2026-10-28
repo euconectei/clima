@@ -27,10 +27,13 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Place
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
+import androidx.compose.material3.InputChip
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
@@ -60,6 +63,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.clima.data.Day
+import app.clima.data.MAX_SAVED_PLACES
+import app.clima.data.Place
 import app.clima.data.Weather
 import app.clima.data.Wmo
 import app.clima.data.compass
@@ -93,7 +98,7 @@ fun ClimaScreen(vm: WeatherViewModel) {
                         Icon(Icons.Default.Place, contentDescription = "Usar minha localização")
                     }
                     IconButton(onClick = { searching = true }) {
-                        Icon(Icons.Default.Search, contentDescription = "Buscar cidade")
+                        Icon(Icons.Default.Search, contentDescription = "Adicionar cidade")
                     }
                 },
             )
@@ -108,6 +113,7 @@ fun ClimaScreen(vm: WeatherViewModel) {
                 modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
+                SavedPlaces(state.saved, state.place, state.temps, onPick = vm::switchTo, onRemove = vm::remove)
                 val weather = state.weather
                 if (weather == null) {
                     EmptyState(error = state.error, loading = state.loading, onRetry = vm::refresh)
@@ -131,6 +137,8 @@ fun ClimaScreen(vm: WeatherViewModel) {
 
     if (searching) {
         SearchSheet(
+            // Com o limite de cidades salvas atingido, só dá para adicionar outra depois de remover uma.
+            full = state.saved.count { !it.isGps } >= MAX_SAVED_PLACES,
             results = state.results,
             onQuery = vm::search,
             onPick = { vm.select(it); searching = false },
@@ -141,6 +149,39 @@ fun ClimaScreen(vm: WeatherViewModel) {
 
 private fun Long.toLocalTime(): String =
     Instant.ofEpochMilli(this).atZone(ZoneId.systemDefault()).toLocalTime().format(DateTimeFormatter.ofPattern("HH:mm"))
+
+/** Locais salvos (localização atual + até 3): um toque troca de cidade, o X remove. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun SavedPlaces(
+    saved: List<Place>,
+    selected: Place,
+    temps: Map<String, Int>,
+    onPick: (Place) -> Unit,
+    onRemove: (Place) -> Unit,
+) {
+    if (saved.size < 2) return
+    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        items(saved, key = { it.key }) { place ->
+            InputChip(
+                selected = place.key == selected.key,
+                onClick = { onPick(place) },
+                label = { Text(listOfNotNull(place.name, temps[place.key]?.let { "$it°" }).joinToString(" · "), maxLines = 1) },
+                leadingIcon = { Icon(if (place.isGps) Icons.Default.LocationOn else Icons.Default.Place, contentDescription = null) },
+                // A localização atual não é removida: ela é recriada pelo botão de pin.
+                trailingIcon = if (place.isGps) null else {
+                    {
+                        Icon(
+                            Icons.Default.Close,
+                            contentDescription = "Remover ${place.name}",
+                            modifier = Modifier.clickable { onRemove(place) },
+                        )
+                    }
+                },
+            )
+        }
+    }
+}
 
 @Composable
 private fun EmptyState(error: String?, loading: Boolean, onRetry: () -> Unit) {
@@ -168,7 +209,7 @@ private fun Hero(w: Weather) {
     ) {
         Text(Wmo.icon(w.code, w.isDay), fontSize = 72.sp)
         Text("${w.temp}°", fontSize = 96.sp, fontWeight = FontWeight.Light, color = MaterialTheme.colorScheme.onSurface)
-        Text(Wmo.label(w.code), style = MaterialTheme.typography.titleLarge)
+        Text(Wmo.label(w.code, w.isDay), style = MaterialTheme.typography.titleLarge)
         Text(
             "Máx ${today.max}° · Mín ${today.min}° · Sensação ${w.feelsLike}°",
             style = MaterialTheme.typography.bodyMedium,
@@ -297,9 +338,10 @@ private fun Tile(icon: String, title: String, value: String, sub: String?, modif
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun SearchSheet(
-    results: List<app.clima.data.Place>,
+    full: Boolean,
+    results: List<Place>,
     onQuery: (String) -> Unit,
-    onPick: (app.clima.data.Place) -> Unit,
+    onPick: (Place) -> Unit,
     onDismiss: () -> Unit,
 ) {
     var query by remember { mutableStateOf("") }
@@ -308,7 +350,8 @@ private fun SearchSheet(
             OutlinedTextField(
                 value = query,
                 onValueChange = { query = it; onQuery(it) },
-                label = { Text("Buscar cidade") },
+                label = { Text(if (full) "Limite de $MAX_SAVED_PLACES cidades atingido" else "Adicionar cidade") },
+                enabled = !full,
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
             )
