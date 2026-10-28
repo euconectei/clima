@@ -25,6 +25,10 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 
 Crie um `local.properties` com `sdk.dir=/caminho/do/Android/sdk` se o Android Studio não o gerar.
 
+## Licença
+
+[PolyForm Noncommercial 1.0.0](LICENSE): você pode usar, estudar, alterar e compartilhar o código para fins não comerciais. Para qualquer uso comercial (inclusive cobrar pelo app ou por uma versão derivada), é preciso uma licença comercial do autor: abra uma issue neste repositório para combinar.
+
 ## Créditos
 
 Dados meteorológicos: [Open-Meteo.com](https://open-meteo.com) (CC BY 4.0).
