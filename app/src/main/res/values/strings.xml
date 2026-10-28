@@ -1,0 +1,9 @@
+<resources>
+    <string name="app_name">Clima</string>
+    <string name="widget_small_label">Clima · Pequeno</string>
+    <string name="widget_medium_label">Clima · Médio</string>
+    <string name="widget_large_label">Clima · Grande</string>
+    <string name="widget_small_desc">Temperatura e condição atual.</string>
+    <string name="widget_medium_desc">Agora e as próximas horas.</string>
+    <string name="widget_large_desc">Agora, próximas horas e previsão de 5 dias.</string>
+</resources>

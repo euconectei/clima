@@ -1,0 +1,64 @@
+package app.clima.data
+
+import org.json.JSONObject
+import java.time.LocalDate
+import java.time.LocalDateTime
+import java.time.LocalTime
+
+data class Place(
+    val name: String,
+    val region: String,
+    val latitude: Double,
+    val longitude: Double,
+) {
+    val label get() = if (region.isBlank()) name else "$name, $region"
+
+    fun toJson(): JSONObject = JSONObject()
+        .put("name", name)
+        .put("region", region)
+        .put("lat", latitude)
+        .put("lon", longitude)
+
+    companion object {
+        fun fromJson(o: JSONObject) =
+            Place(o.getString("name"), o.optString("region"), o.getDouble("lat"), o.getDouble("lon"))
+    }
+}
+
+data class Hour(
+    val time: LocalDateTime,
+    val temp: Int,
+    val code: Int,
+    val rainChance: Int,
+    val isDay: Boolean,
+)
+
+data class Day(
+    val date: LocalDate,
+    val code: Int,
+    val max: Int,
+    val min: Int,
+    val rainChance: Int,
+    val rainMm: Double,
+    val uvMax: Double,
+)
+
+data class Weather(
+    val place: Place,
+    val fetchedAt: Long,
+    val temp: Int,
+    val feelsLike: Int,
+    val humidity: Int,
+    val windKmh: Int,
+    val windGustKmh: Int,
+    val windDirection: Int,
+    val pressureHpa: Int,
+    val cloudCover: Int,
+    val rainNowMm: Double,
+    val code: Int,
+    val isDay: Boolean,
+    val sunrise: LocalTime?,
+    val sunset: LocalTime?,
+    val hourly: List<Hour>,
+    val daily: List<Day>,
+)
